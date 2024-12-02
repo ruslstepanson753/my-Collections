@@ -8,29 +8,26 @@ import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
 public class MyList<E> implements List<E> {
-    private E[] elements = (E[]) new Object[0];
 
+    private E[] elements = (E[]) new Object[0];
     private int size;
 
     @Override
     public boolean add(E e) {
-        if (size == elements.length) {
-            elements = Arrays.copyOf(elements, size + size / 2 + 1);
-        }
+        ensureCapacity(size + 1);
         elements[size++] = e;
         return true;
     }
 
     @Override
     public void add(int index, E element) {
-        if (size == elements.length) {
-            elements = Arrays.copyOf(elements, size + size / 2 + 1);
+        if (index < 0 || index > size) {
+            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
         }
-        size++;
-        for (int i = size; i > index; i--) {
-            elements[i] = elements[i - 1];
-        }
+        ensureCapacity(size + 1);
+        System.arraycopy(elements, index, elements, index + 1, size - index);
         elements[index] = element;
+        size++;
     }
 
     @Override
@@ -45,17 +42,116 @@ public class MyList<E> implements List<E> {
 
     @Override
     public boolean contains(Object o) {
-        return (indexOf(o) != -1);
+        return indexOf(o) != -1;
     }
 
     @Override
     public Iterator<E> iterator() {
-        return null;
+        return new Iterator<E>() {
+            private int index = 0;
+            private boolean canRemove = false;
+
+            @Override
+            public boolean hasNext() {
+                return index < size;
+            }
+
+            @Override
+            public E next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                canRemove = true;
+                return elements[index++];
+            }
+
+            @Override
+            public void remove() {
+                if (!canRemove) {
+                    throw new IllegalStateException("Remove operation cannot be called before next()");
+                }
+                MyList.this.remove(--index);
+                canRemove = false;
+            }
+        };
     }
 
     @Override
-    public void forEach(Consumer<? super E> action) {
-        List.super.forEach(action);
+    public ListIterator<E> listIterator() {
+        return listIterator(0);
+    }
+
+    @Override
+    public ListIterator<E> listIterator(int index) {
+        if (index < 0 || index > size) {
+            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
+        }
+        return new ListIterator<E>() {
+            private int cursor = index;
+            private int lastReturned = -1;
+
+            @Override
+            public boolean hasNext() {
+                return cursor < size;
+            }
+
+            @Override
+            public E next() {
+                if (!hasNext()) {
+                    throw new NoSuchElementException();
+                }
+                lastReturned = cursor;
+                return elements[cursor++];
+            }
+
+            @Override
+            public boolean hasPrevious() {
+                return cursor > 0;
+            }
+
+            @Override
+            public E previous() {
+                if (!hasPrevious()) {
+                    throw new NoSuchElementException();
+                }
+                lastReturned = --cursor;
+                return elements[cursor];
+            }
+
+            @Override
+            public int nextIndex() {
+                return cursor;
+            }
+
+            @Override
+            public int previousIndex() {
+                return cursor - 1;
+            }
+
+            @Override
+            public void remove() {
+                if (lastReturned < 0) {
+                    throw new IllegalStateException();
+                }
+                MyList.this.remove(lastReturned);
+                cursor = lastReturned;
+                lastReturned = -1;
+            }
+
+            @Override
+            public void set(E e) {
+                if (lastReturned < 0) {
+                    throw new IllegalStateException();
+                }
+                elements[lastReturned] = e;
+            }
+
+            @Override
+            public void add(E e) {
+                MyList.this.add(cursor++, e);
+                lastReturned = -1;
+            }
+        };
     }
 
     @Override
@@ -65,13 +161,14 @@ public class MyList<E> implements List<E> {
 
     @Override
     public <T> T[] toArray(T[] a) {
-        return (T[]) Arrays.copyOf(elements, size);
-
-    }
-
-    @Override
-    public <T> T[] toArray(IntFunction<T[]> generator) {
-        return List.super.toArray(generator);
+        if (a.length < size) {
+            return (T[]) Arrays.copyOf(elements, size, a.getClass());
+        }
+        System.arraycopy(elements, 0, a, 0, size);
+        if (a.length > size) {
+            a[size] = null;
+        }
+        return a;
     }
 
     @Override
@@ -86,82 +183,44 @@ public class MyList<E> implements List<E> {
 
     @Override
     public E remove(int index) {
-        E old = elements[index];
-        for (int j = index; j < size - 1; j++) {
-            elements[j] = elements[j + 1];
+        if (index < 0 || index >= size) {
+            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
         }
-        size--;
-        elements[size] = null;
-        return old;
-    }
-
-    @Override
-    public boolean containsAll(Collection<?> c) {
-        for (Object o : c) {
-            if (indexOf(o) < 0) {
-                return false;
-            }
+        E oldValue = elements[index];
+        int numMoved = size - index - 1;
+        if (numMoved > 0) {
+            System.arraycopy(elements, index + 1, elements, index, numMoved);
         }
-        return true;
-    }
-
-    @Override
-    public boolean addAll(Collection<? extends E> c) {
-        for (E e : c) {
-            add(e);
-        }
-        return true;
-    }
-
-    @Override
-    public boolean addAll(int index, Collection<? extends E> c) {
-        E[] elementsHelp = Arrays.copyOfRange(elements, index, size );
-        for (int i = size-1; i >= index; i--) {
-            remove(i);
-        }
-        addAll(c);
-        for (int i = 0; i < elementsHelp.length; i++) {
-            add(elementsHelp[i]);
-        }
-        return true;
-    }
-
-    @Override
-    public boolean removeAll(Collection<?> c) {
-        boolean changed = false;
-        for (Object o : c) {
-            if (remove(o)==true) {
-                changed = true;
-            }
-        }
-        return changed;
+        elements[--size] = null;
+        return oldValue;
     }
 
     @Override
     public boolean removeIf(Predicate<? super E> filter) {
-        return List.super.removeIf(filter);
-    }
-
-    @Override
-    public boolean retainAll(Collection<?> c) {
-        return false;
+        Objects.requireNonNull(filter);
+        boolean removed = false;
+        Iterator<E> it = iterator();
+        while (it.hasNext()) {
+            if (filter.test(it.next())) {
+                it.remove();
+                removed = true;
+            }
+        }
+        return removed;
     }
 
     @Override
     public void replaceAll(UnaryOperator<E> operator) {
-        List.super.replaceAll(operator);
-    }
-
-    @Override
-    public void sort(Comparator<? super E> c) {
-        List.super.sort(c);
+        Objects.requireNonNull(operator);
+        for (int i = 0; i < size; i++) {
+            elements[i] = operator.apply(elements[i]);
+        }
     }
 
     @Override
     public void clear() {
-        for (int i = 0; i < size; i++) {
-            elements[i]=null;
-        }
+        Arrays.fill(elements, 0, size, null);
+        size = 0;
     }
 
     @Override
@@ -187,86 +246,86 @@ public class MyList<E> implements List<E> {
     }
 
     @Override
-    public int lastIndexOf(Object o) {
-        return 0;
-    }
-
-    @Override
-    public ListIterator<E> listIterator() {
-        return null;
-    }
-
-    @Override
-    public ListIterator<E> listIterator(int index) {
-        return null;
-    }
-
-    @Override
     public List<E> subList(int fromIndex, int toIndex) {
-        return List.of();
+        if (fromIndex < 0 || toIndex > size || fromIndex > toIndex) {
+            throw new IndexOutOfBoundsException("fromIndex: " + fromIndex + ", toIndex: " + toIndex);
+        }
+        List<E> subList = new ArrayList<>();
+        for (int i = fromIndex; i < toIndex; i++) {
+            subList.add(elements[i]);
+        }
+        return subList;
     }
 
     @Override
-    public Spliterator<E> spliterator() {
-        return List.super.spliterator();
-    }
-
-    @Override
-    public Stream<E> stream() {
-        return List.super.stream();
-    }
-
-    @Override
-    public Stream<E> parallelStream() {
-        return List.super.parallelStream();
-    }
-
-    @Override
-    public void addFirst(E e) {
-        List.super.addFirst(e);
-    }
-
-    @Override
-    public void addLast(E e) {
-        List.super.addLast(e);
-    }
-
-    @Override
-    public E getFirst() {
-        return List.super.getFirst();
-    }
-
-    @Override
-    public E getLast() {
-        return List.super.getLast();
-    }
-
-    @Override
-    public E removeFirst() {
-        return List.super.removeFirst();
-    }
-
-    @Override
-    public E removeLast() {
-        return List.super.removeLast();
-    }
-
-    @Override
-    public List<E> reversed() {
-        return List.super.reversed();
-    }
-
-    @Override
-    public String toString() {
-        StringBuilder builder = new StringBuilder();
-        builder.append("{");
-        for (int i = 0; i < size; i++) {
-            builder.append(elements[i]);
-            if (i < size - 1) {
-                builder.append(", ");
+    public int lastIndexOf(Object o) {
+        for (int i = size - 1; i >= 0; i--) {
+            if (Objects.equals(elements[i], o)) {
+                return i;
             }
         }
-        builder.append("}");
-        return builder.toString();
+        return -1;
+    }
+
+    @Override
+    public boolean containsAll(Collection<?> c) {
+        for (Object o : c) {
+            if (!contains(o)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @Override
+    public boolean addAll(Collection<? extends E> c) {
+        Objects.requireNonNull(c);
+        for (E e : c) {
+            add(e);
+        }
+        return true;
+    }
+
+    @Override
+    public boolean addAll(int index, Collection<? extends E> c) {
+        Objects.requireNonNull(c);
+        for (E e : c) {
+            add(index++, e);
+        }
+        return true;
+    }
+
+    @Override
+    public boolean removeAll(Collection<?> c) {
+        Objects.requireNonNull(c);
+        boolean modified = false;
+        Iterator<E> it = iterator();
+        while (it.hasNext()) {
+            if (c.contains(it.next())) {
+                it.remove();
+                modified = true;
+            }
+        }
+        return modified;
+    }
+
+    @Override
+    public boolean retainAll(Collection<?> c) {
+        Objects.requireNonNull(c);
+        boolean modified = false;
+        Iterator<E> it = iterator();
+        while (it.hasNext()) {
+            if (!c.contains(it.next())) {
+                it.remove();
+                modified = true;
+            }
+        }
+        return modified;
+    }
+
+    private void ensureCapacity(int minCapacity) {
+        if (elements.length < minCapacity) {
+            elements = Arrays.copyOf(elements, Math.max(minCapacity, elements.length + (elements.length >> 1)));
+        }
     }
 }
